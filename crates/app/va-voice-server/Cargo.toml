@@ -1,7 +1,0 @@
-[package]
-name = "va-voice-server"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-vosk = "0.3.1"

@@ -1,7 +1,6 @@
 mod audio;
 mod config;
 
-use crate::config::get_vosk_model_path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -20,10 +19,10 @@ struct AppState {
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let model_path = get_vosk_model_path()?;
-    let model =
-        Arc::new(Model::new(model_path.to_string_lossy()).ok_or("Failed to load VOSK model")?);
-    let addr = std::env::var("VA_VOICE_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    let bind_addr = config::get_bind_addr();
+    let model_path = config::get_vosk_model_path();
+
+    let model = Arc::new(Model::new(model_path).ok_or("Failed to load VOSK model")?);
 
     let (sender, _) = broadcast::channel(128);
     audio::spawn_shared_recognizer_stream(Arc::clone(&model), sender.clone())?;
@@ -35,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }))
             .route("/text", web::get().to(text_stream))
     })
-    .bind(addr)?
+    .bind(bind_addr)?
     .run()
     .await?;
 

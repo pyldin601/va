@@ -1,77 +1,89 @@
 mod audio;
 mod config;
 
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
 use crate::config::get_vosk_model_path;
-use cpal::traits::{DeviceTrait, StreamTrait};
-use cpal::Sample;
-use vosk::{CompleteResult, DecodingState, Model, Recognizer};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
-fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let device = audio::create_device()?;
-    let supported_config = device.default_input_config()?;
-    let stream_config: cpal::StreamConfig = supported_config.into();
+use actix_web::{web, App, Error, HttpResponse, HttpServer};
+use bytes::Bytes;
+use futures_util::Stream;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
+use vosk::Model;
 
-    let sample_rate = stream_config.sample_rate.0 as f32;
-    let channels = stream_config.channels;
+#[derive(Clone)]
+struct AppState {
+    sender: broadcast::Sender<String>,
+}
 
-    let vosk_model_path = get_vosk_model_path()?;
-    let vosk_model =
-        Model::new(vosk_model_path.to_string_lossy()).ok_or("Failed to load VOSK model")?;
-    let vosk_recognizer = Arc::new(Mutex::new(
-        Recognizer::new(&vosk_model, sample_rate).ok_or("Failed to create recognizer")?,
-    ));
+#[actix_web::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let model_path = get_vosk_model_path()?;
+    let model =
+        Arc::new(Model::new(model_path.to_string_lossy()).ok_or("Failed to load VOSK model")?);
+    let addr = std::env::var("VA_VOICE_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
 
-    let stream = device.build_input_stream(
-        &stream_config,
-        move |data: &[f32], _| {
-            let mut samples = Vec::with_capacity(data.len() / channels as usize);
+    let (sender, _) = broadcast::channel(128);
+    audio::spawn_shared_recognizer_stream(Arc::clone(&model), sender.clone())?;
 
-            for frame in data.chunks(channels as usize) {
-                let sample = frame.get(0).copied().map(i16::from_sample).unwrap_or(0);
-                samples.push(sample);
-            }
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(AppState {
+                sender: sender.clone(),
+            }))
+            .route("/text", web::get().to(text_stream))
+    })
+    .bind(addr)?
+    .run()
+    .await?;
 
-            let mut recognizer = match vosk_recognizer.lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
-            };
+    Ok(())
+}
 
-            match recognizer.accept_waveform(&samples) {
-                Ok(DecodingState::Finalized) => {
-                    if let Some(text) = complete_text(recognizer.result()) {
-                        if !text.is_empty() {
-                            println!("{text}");
-                        }
-                    }
-                }
-                Ok(DecodingState::Failed) => {
-                    eprintln!("decoding failed");
-                }
-                Ok(DecodingState::Running) => {}
-                Err(err) => eprintln!("decode error: {err}"),
-            }
-        },
-        move |err| eprintln!("audio error: {err}"),
-        None,
-    )?;
+async fn text_stream(state: web::Data<AppState>) -> Result<HttpResponse, Error> {
+    let receiver = state.sender.subscribe();
+    let stream = SseStream::new(receiver);
 
-    stream.play()?;
+    Ok(HttpResponse::Ok()
+        .insert_header(("Content-Type", "text/event-stream"))
+        .insert_header(("Cache-Control", "no-cache"))
+        .insert_header(("Connection", "keep-alive"))
+        .streaming(stream))
+}
 
-    loop {
-        std::thread::sleep(Duration::from_secs(1));
+struct SseStream {
+    inner: BroadcastStream<String>,
+}
+
+impl SseStream {
+    fn new(receiver: broadcast::Receiver<String>) -> Self {
+        Self {
+            inner: BroadcastStream::new(receiver),
+        }
     }
 }
 
-fn complete_text(result: CompleteResult<'_>) -> Option<String> {
-    eprintln!("RES: {result:?}");
-    match result {
-        CompleteResult::Single(single) => Some(single.text.to_string()),
-        CompleteResult::Multiple(multiple) => multiple
-            .alternatives
-            .first()
-            .map(|alternative| alternative.text.to_string()),
+impl Stream for SseStream {
+    type Item = Result<Bytes, Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            return match Pin::new(&mut this.inner).poll_next(cx) {
+                Poll::Ready(Some(Ok(text))) => {
+                    let body = format!("data: {}\n\n", sse_escape(&text));
+                    Poll::Ready(Some(Ok(Bytes::from(body))))
+                }
+                Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => continue,
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            };
+        }
     }
+}
+
+fn sse_escape(text: &str) -> String {
+    text.replace('\n', "\ndata: ")
 }

@@ -1,11 +1,10 @@
-mod audio;
-
 use std::env;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::Sample;
 use vosk::{CompleteResult, DecodingState, Model, Recognizer};
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -28,7 +27,8 @@ fn run_vosk(model_path: PathBuf) -> Result<(), Box<dyn std::error::Error + Send 
     let device = host
         .default_input_device()
         .ok_or("No input device available")?;
-    let supported_config = select_i16_mono_48k_config(&device)?;
+    let supported_config = device.default_input_config()?;
+    let sample_format = supported_config.sample_format();
     let stream_config: cpal::StreamConfig = supported_config.into();
     let sample_rate = stream_config.sample_rate.0 as f32;
     let channels = stream_config.channels;
@@ -44,8 +44,19 @@ fn run_vosk(model_path: PathBuf) -> Result<(), Box<dyn std::error::Error + Send 
         sample_rate as u32,
         channels
     );
-    let stream =
-        build_input_stream(&device, &stream_config, Arc::clone(&recognizer), channels)?;
+    let stream = match sample_format {
+        cpal::SampleFormat::I16 => {
+            build_input_stream::<i16>(&device, &stream_config, Arc::clone(&recognizer), channels)?
+        }
+        cpal::SampleFormat::U16 => {
+            build_input_stream::<u16>(&device, &stream_config, Arc::clone(&recognizer), channels)?
+        }
+        cpal::SampleFormat::F32 => {
+            build_input_stream::<f32>(&device, &stream_config, Arc::clone(&recognizer), channels)?
+        }
+        _ => return Err("Unsupported sample format".into()),
+    };
+
 
     stream.play()?;
 
@@ -54,38 +65,25 @@ fn run_vosk(model_path: PathBuf) -> Result<(), Box<dyn std::error::Error + Send 
     }
 }
 
-fn select_i16_mono_48k_config(
-    device: &cpal::Device,
-) -> Result<cpal::SupportedStreamConfig, Box<dyn std::error::Error + Send + Sync>> {
-    let mut supported_configs = device.supported_input_configs()?;
-    let target_rate = cpal::SampleRate(48_000);
-    let config = supported_configs.find(|config| {
-        config.sample_format() == cpal::SampleFormat::I16
-            && config.channels() == 1
-            && config.min_sample_rate() <= target_rate
-            && config.max_sample_rate() >= target_rate
-    });
-    match config {
-        Some(config) => Ok(config.with_sample_rate(target_rate)),
-        None => Err("Device does not support i16 mono 48000 Hz input".into()),
-    }
-}
-
-fn build_input_stream(
+fn build_input_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     recognizer: Arc<Mutex<Recognizer>>,
     channels: u16,
 ) -> Result<cpal::Stream, Box<dyn std::error::Error + Send + Sync>>
+where
+    T: cpal::Sample + cpal::SizedSample,
+    i16: cpal::FromSample<T>,
 {
     let stream = device.build_input_stream(
         config,
-        move |data: &[i16], _| {
+        move |data: &[T], _| {
             let mut samples = Vec::with_capacity(data.len() / channels as usize);
             for frame in data.chunks(channels as usize) {
                 let sample = frame
                     .get(0)
                     .copied()
+                    .map(i16::from_sample)
                     .unwrap_or(0);
                 samples.push(sample);
             }

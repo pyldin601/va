@@ -1,66 +1,18 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{mpsc, Arc, Mutex};
 
-use cpal::traits::HostTrait;
-use cpal::{
-    traits::{DeviceTrait, StreamTrait},
-    Sample, SampleFormat,
-};
-use tokio::sync::broadcast;
-use vosk::{CompleteResult, DecodingState, Model, Recognizer};
+use crate::error::Error;
+use cpal::{traits::DeviceTrait, Sample, SampleFormat};
+use tracing::{error, warn};
+use vosk::{CompleteResult, DecodingState, Recognizer};
 
-pub(crate) fn spawn_shared_recognizer_stream(
-    model: Arc<Model>,
-    sender: broadcast::Sender<String>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    std::thread::spawn(move || {
-        if let Err(err) = run_recognizer_stream(model, sender) {
-            eprintln!("audio session error: {err}");
-        }
-    });
-    Ok(())
-}
-
-fn run_recognizer_stream(
-    model: Arc<Model>,
-    sender: broadcast::Sender<String>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or("No input device available")?;
-    let supported_config = device.default_input_config()?;
-    let sample_format = supported_config.sample_format();
-    let stream_config: cpal::StreamConfig = supported_config.into();
-    let sample_rate = stream_config.sample_rate.0 as f32;
-    let channels = stream_config.channels;
-    let recognizer = Arc::new(Mutex::new(
-        Recognizer::new(&model, sample_rate).ok_or("Failed to create recognizer")?,
-    ));
-
-    let stream = build_input_stream(
-        &device,
-        &stream_config,
-        sample_format,
-        recognizer,
-        channels,
-        sender,
-    )?;
-
-    stream.play()?;
-    loop {
-        std::thread::sleep(Duration::from_millis(200));
-    }
-}
-
-fn build_input_stream(
+pub(crate) fn build_input_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     sample_format: SampleFormat,
     recognizer: Arc<Mutex<Recognizer>>,
     channels: u16,
-    sender: broadcast::Sender<String>,
-) -> Result<cpal::Stream, Box<dyn std::error::Error + Send + Sync>> {
+    sender: mpsc::Sender<String>,
+) -> Result<cpal::Stream, Error> {
     match sample_format {
         SampleFormat::I16 => {
             build_input_stream_inner::<i16>(device, config, recognizer, channels, sender)
@@ -80,8 +32,8 @@ fn build_input_stream_inner<T>(
     config: &cpal::StreamConfig,
     recognizer: Arc<Mutex<Recognizer>>,
     channels: u16,
-    sender: broadcast::Sender<String>,
-) -> Result<cpal::Stream, Box<dyn std::error::Error + Send + Sync>>
+    sender: mpsc::Sender<String>,
+) -> Result<cpal::Stream, Error>
 where
     T: cpal::Sample + cpal::SizedSample,
     i16: cpal::FromSample<T>,
@@ -107,13 +59,13 @@ where
                     }
                 }
                 Ok(DecodingState::Failed) => {
-                    eprintln!("decoding failed");
+                    warn!("decoding failed");
                 }
                 Ok(DecodingState::Running) => {}
-                Err(err) => eprintln!("decode error: {err}"),
+                Err(err) => error!("decode error: {err}"),
             }
         },
-        move |err| eprintln!("audio error: {err}"),
+        move |err| error!("audio error: {err}"),
         None,
     )?;
 

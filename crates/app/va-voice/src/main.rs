@@ -1,88 +1,62 @@
 mod audio;
 mod config;
+mod error;
+mod setup;
 
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::sync;
+use tracing::warn;
 
-use actix_web::{web, App, Error, HttpResponse, HttpServer};
-use bytes::Bytes;
-use futures_util::Stream;
-use tokio::sync::broadcast;
-use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
-use vosk::Model;
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    dotenvy::dotenv().ok();
 
-#[derive(Clone)]
-struct AppState {
-    sender: broadcast::Sender<String>,
-}
+    let config = config::Config::from_env()?;
 
-#[actix_web::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let bind_addr = config::get_bind_addr();
-    let model_path = config::get_vosk_model_path();
+    let (sender, receiver) = sync::mpsc::channel::<String>();
 
-    let model = Arc::new(Model::new(model_path).ok_or("Failed to load VOSK model")?);
+    let t = std::thread::spawn({
+        let client = reqwest::blocking::Client::new();
+        let webhook_url = config.webhook_url.clone();
 
-    let (sender, _) = broadcast::channel(128);
-    audio::spawn_shared_recognizer_stream(Arc::clone(&model), sender.clone())?;
+        move || {
+            while let Ok(text) = receiver.recv() {
+                let result = client
+                    .post(&webhook_url)
+                    .json(&serde_json::json!({ "text": text }))
+                    .send();
 
-    HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(AppState {
-                sender: sender.clone(),
-            }))
-            .route("/text", web::get().to(text_stream))
-    })
-    .bind(bind_addr)?
-    .run()
-    .await?;
+                if let Err(err) = result {
+                    warn!("webhook error: {err:?}")
+                }
+            }
+        }
+    });
+
+    let model = setup::setup_vosk_model(&config)?;
+    let host = cpal::default_host();
+    let device = host
+        .default_input_device()
+        .ok_or("No input device available")?;
+    let supported_config = device.default_input_config()?;
+    let sample_format = supported_config.sample_format();
+    let stream_config: cpal::StreamConfig = supported_config.into();
+    let sample_rate = stream_config.sample_rate as f32;
+    let channels = stream_config.channels;
+
+    let recognizer = setup::setup_recognizer(&model, sample_rate)?;
+
+    let stream = audio::build_input_stream(
+        &device,
+        &stream_config,
+        sample_format,
+        recognizer,
+        channels,
+        sender,
+    )?;
+
+    stream.play()?;
+
+    t.join().expect("thread panicked");
 
     Ok(())
-}
-
-async fn text_stream(state: web::Data<AppState>) -> Result<HttpResponse, Error> {
-    let receiver = state.sender.subscribe();
-    let stream = SseStream::new(receiver);
-
-    Ok(HttpResponse::Ok()
-        .insert_header(("Content-Type", "text/event-stream"))
-        .insert_header(("Cache-Control", "no-cache"))
-        .insert_header(("Connection", "keep-alive"))
-        .streaming(stream))
-}
-
-struct SseStream {
-    inner: BroadcastStream<String>,
-}
-
-impl SseStream {
-    fn new(receiver: broadcast::Receiver<String>) -> Self {
-        Self {
-            inner: BroadcastStream::new(receiver),
-        }
-    }
-}
-
-impl Stream for SseStream {
-    type Item = Result<Bytes, Error>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        loop {
-            return match Pin::new(&mut this.inner).poll_next(cx) {
-                Poll::Ready(Some(Ok(text))) => {
-                    let body = format!("data: {}\n\n", sse_escape(&text));
-                    Poll::Ready(Some(Ok(Bytes::from(body))))
-                }
-                Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => continue,
-                Poll::Ready(None) => Poll::Ready(None),
-                Poll::Pending => Poll::Pending,
-            };
-        }
-    }
-}
-
-fn sse_escape(text: &str) -> String {
-    text.replace('\n', "\ndata: ")
 }

@@ -1,12 +1,22 @@
+use crate::error::Error;
 use std::env;
 
-const VOSK_MODEL_PATH_ENV: &str = "VOSK_MODEL_PATH";
-const BIND_ADDR_ENV: &str = "BIND_ADDR";
-
-pub(crate) fn get_vosk_model_path() -> String {
-    env::var(VOSK_MODEL_PATH_ENV).expect(&format!("{VOSK_MODEL_PATH_ENV} is not set"))
+#[derive(Debug, Clone)]
+pub(crate) struct Config {
+    pub(crate) vosk_model_path: String,
+    pub(crate) webhook_url: String,
 }
 
-pub(crate) fn get_bind_addr() -> String {
-    env::var(BIND_ADDR_ENV).unwrap_or_else(|_| "127.0.0.1:8080".to_string())
+impl Config {
+    pub(crate) fn from_env() -> Result<Self, Error> {
+        let vosk_model_path =
+            env::var("VOSK_MODEL_PATH").map_err(|_| "VOSK_MODEL_PATH is not set")?;
+
+        let webhook_url = env::var("WEBHOOK_URL").map_err(|_| "WEBHOOK_URL is not set")?;
+
+        Ok(Self {
+            vosk_model_path,
+            webhook_url,
+        })
+    }
 }

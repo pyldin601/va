@@ -9,6 +9,7 @@ Environment variables (loaded via `.env` if present):
 
 - `VOSK_MODEL_PATH` (required): filesystem path to the Vosk model directory.
 - `WEBHOOK_URL` (required): URL to `POST` recognized text to.
+- `WEBHOOK_QUEUE_SIZE` (optional): bounded queue size for webhook deliveries (default: 128).
 
 ## Webhook payload
 

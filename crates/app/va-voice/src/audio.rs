@@ -5,7 +5,7 @@ use cpal::{
     traits::DeviceTrait, Device, FromSample, Sample, SampleFormat, SizedSample, Stream,
     StreamConfig,
 };
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use vosk::{CompleteResult, DecodingState, Recognizer};
 
 pub(crate) fn build_input_stream(
@@ -57,6 +57,7 @@ where
                 Ok(DecodingState::Finalized) => {
                     if let Some(text) = complete_text(recognizer.result()) {
                         if !text.is_empty() {
+                            info!("recognized: {text}");
                             let _ = sender.send(text);
                         }
                     }

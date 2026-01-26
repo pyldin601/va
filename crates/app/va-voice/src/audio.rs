@@ -1,18 +1,21 @@
 use std::sync::{mpsc, Arc, Mutex};
 
 use crate::error::Error;
-use cpal::{traits::DeviceTrait, Sample, SampleFormat};
+use cpal::{
+    traits::DeviceTrait, Device, FromSample, Sample, SampleFormat, SizedSample, Stream,
+    StreamConfig,
+};
 use tracing::{error, warn};
 use vosk::{CompleteResult, DecodingState, Recognizer};
 
 pub(crate) fn build_input_stream(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
+    device: &Device,
+    config: &StreamConfig,
     sample_format: SampleFormat,
     recognizer: Arc<Mutex<Recognizer>>,
     channels: u16,
     sender: mpsc::Sender<String>,
-) -> Result<cpal::Stream, Error> {
+) -> Result<Stream, Error> {
     match sample_format {
         SampleFormat::I16 => {
             build_input_stream_inner::<i16>(device, config, recognizer, channels, sender)
@@ -28,15 +31,15 @@ pub(crate) fn build_input_stream(
 }
 
 fn build_input_stream_inner<T>(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
+    device: &Device,
+    config: &StreamConfig,
     recognizer: Arc<Mutex<Recognizer>>,
     channels: u16,
     sender: mpsc::Sender<String>,
-) -> Result<cpal::Stream, Error>
+) -> Result<Stream, Error>
 where
-    T: cpal::Sample + cpal::SizedSample,
-    i16: cpal::FromSample<T>,
+    T: Sample + SizedSample,
+    i16: FromSample<T>,
 {
     let stream = device.build_input_stream(
         config,

@@ -1,51 +1,13 @@
+mod config;
+mod error;
+
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::env;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-const ENV_ACTIVATION_WORD: &str = "ACTIVATION_WORD";
-const ENV_STOP_WORDS: &str = "STOP_WORDS";
-const ENV_BIND_ADDR: &str = "BIND_ADDR";
-
-#[derive(Clone)]
-struct Config {
-    activation_word: String,
-    stop_words: HashSet<String>,
-    bind_addr: String,
-}
-
-impl Config {
-    fn from_env() -> Result<Self, String> {
-        let activation_word = env::var(ENV_ACTIVATION_WORD)
-            .map_err(|_| format!("{ENV_ACTIVATION_WORD} is not set"))?
-            .trim()
-            .to_lowercase();
-        if activation_word.is_empty() {
-            return Err(format!("{ENV_ACTIVATION_WORD} must not be empty"));
-        }
-
-        let stop_words_raw = env::var(ENV_STOP_WORDS)
-            .map_err(|_| format!("{ENV_STOP_WORDS} is not set"))?;
-        let stop_words = stop_words_raw
-            .split(',')
-            .map(|word| word.trim().to_lowercase())
-            .filter(|word| !word.is_empty())
-            .collect::<HashSet<_>>();
-        if stop_words.is_empty() {
-            return Err(format!("{ENV_STOP_WORDS} must contain at least one word"));
-        }
-
-        let bind_addr = env::var(ENV_BIND_ADDR).unwrap_or_else(|_| "127.0.0.1:8090".to_string());
-
-        Ok(Self {
-            activation_word,
-            stop_words,
-            bind_addr,
-        })
-    }
-}
+use crate::config::Config;
 
 struct AppState {
     config: Config,

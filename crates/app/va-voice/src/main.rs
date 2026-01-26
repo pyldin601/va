@@ -10,6 +10,8 @@ use futures_util::stream::StreamExt;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 use vosk::{Model, Recognizer};
 
 #[derive(Clone)]
@@ -45,6 +47,12 @@ struct HealthResponse {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let addr = "127.0.0.1:8080";
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
     println!("va-voice listening on {addr}");
 
     HttpServer::new(|| App::new().service(health).service(text))
@@ -205,6 +213,9 @@ where
             };
             if recognizer.accept_waveform(&samples) {
                 if let Some(text) = extract_text(&recognizer.result(), "text") {
+                    if !text.is_empty() {
+                        info!("recognized: {text}");
+                    }
                     send_event(&sender, EventKind::Final, text);
                 }
             } else if let Some(text) = extract_text(&recognizer.partial_result(), "partial") {

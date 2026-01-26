@@ -14,7 +14,7 @@ pub(crate) fn build_input_stream(
     sample_format: SampleFormat,
     recognizer: Arc<Mutex<Recognizer>>,
     channels: u16,
-    sender: mpsc::Sender<String>,
+    sender: mpsc::SyncSender<String>,
 ) -> Result<Stream, Error> {
     match sample_format {
         SampleFormat::I16 => {
@@ -35,7 +35,7 @@ fn build_input_stream_inner<T>(
     config: &StreamConfig,
     recognizer: Arc<Mutex<Recognizer>>,
     channels: u16,
-    sender: mpsc::Sender<String>,
+    sender: mpsc::SyncSender<String>,
 ) -> Result<Stream, Error>
 where
     T: Sample + SizedSample,
@@ -58,7 +58,9 @@ where
                     if let Some(text) = complete_text(recognizer.result()) {
                         if !text.is_empty() {
                             info!("recognized: {text}");
-                            let _ = sender.send(text);
+                            if let Err(err) = sender.try_send(text) {
+                                warn!("dropping transcript; sender full: {err}");
+                            }
                         }
                     }
                 }

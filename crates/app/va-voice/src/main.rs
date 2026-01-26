@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let config = config::Config::from_env()?;
 
-    let (sender, receiver) = sync::mpsc::channel::<String>();
+    let (sender, receiver) = sync::mpsc::sync_channel::<String>(1024);
 
     let t = std::thread::spawn({
         let client = reqwest::blocking::Client::new();

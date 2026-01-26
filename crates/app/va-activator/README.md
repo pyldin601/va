@@ -1,7 +1,7 @@
 # va-activator
 
-`va-activator` receives webhook POSTs, waits for an activation word, then buffers subsequent text until a stop word
-is received.
+`va-activator` receives webhook POSTs, filters for an activation word, and returns the command found in the same
+sentence.
 
 ## Configuration
 
@@ -19,15 +19,15 @@ Environment variables (loaded via `.env` if present):
 
 ## Webhook behavior
 
-- If not listening, only requests that start with the activation word are accepted.
-- Once activated, subsequent text is buffered.
-- When a stop word is received, the buffer is returned as `command` and listening resets.
+- Only requests that start with the activation word are accepted.
+- The command is the remainder of the same sentence.
+- If any stop word appears in the remainder, the request is treated as cancelled.
 
 Response example:
 
 ```json
 {
-  "status": "stopped",
+  "status": "accepted",
   "command": "set volume to twenty"
 }
 ```

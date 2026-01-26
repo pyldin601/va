@@ -2,8 +2,8 @@
 
 ## Purpose
 
-`va-activator` listens for webhook requests, detects an activation word, buffers subsequent text, and stops when a
-stop word is received.
+`va-activator` listens for webhook requests, detects an activation word, and extracts the command from the same
+sentence.
 
 ## Inputs
 
@@ -35,10 +35,9 @@ stop word is received.
 ## Behavior
 
 - Text is normalized by trimming and converting to lowercase.
-- If idle and the text starts with the activation word, listening begins.
-- While listening, text is buffered until a stop word is received.
-- On stop word, listening resets and the buffered command is returned.
-- If stop word is received immediately, the command is null.
+- If the text starts with the activation word, the remainder is treated as the command.
+- If any stop word appears in the remainder, the request is treated as cancelled.
+- If the remainder is empty, the request is ignored.
 
 ## Endpoints
 

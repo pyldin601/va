@@ -2,7 +2,6 @@ use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
-use std::sync::Mutex;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -48,15 +47,8 @@ impl Config {
     }
 }
 
-#[derive(Default)]
-struct ListenerState {
-    listening: bool,
-    buffer: Vec<String>,
-}
-
 struct AppState {
     config: Config,
-    listener: Mutex<ListenerState>,
 }
 
 #[derive(Deserialize)]
@@ -97,7 +89,6 @@ async fn main() -> std::io::Result<()> {
 
     let app_state = web::Data::new(AppState {
         config,
-        listener: Mutex::new(ListenerState::default()),
     });
 
     HttpServer::new(move || {
@@ -129,62 +120,33 @@ async fn webhook(
         });
     }
 
-    let mut listener = match state.listener.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            return HttpResponse::InternalServerError().json(WebhookResponse {
-                status: "error",
-                command: None,
-            });
-        }
-    };
-
-    if !listener.listening {
-        if starts_with_word(&text, &state.config.activation_word) {
-            listener.listening = true;
-            let remainder = text[state.config.activation_word.len()..].trim();
-            if !remainder.is_empty() {
-                if state.config.stop_words.contains(remainder) {
-                    listener.listening = false;
-                    return HttpResponse::Ok().json(WebhookResponse {
-                        status: "stopped",
-                        command: None,
-                    });
-                }
-                listener.buffer.push(remainder.to_string());
-            }
-            info!("activation detected");
-            return HttpResponse::Ok().json(WebhookResponse {
-                status: "listening",
-                command: None,
-            });
-        }
-
+    if !starts_with_word(&text, &state.config.activation_word) {
         return HttpResponse::Ok().json(WebhookResponse {
             status: "ignored",
             command: None,
         });
     }
 
-    if state.config.stop_words.contains(&text) {
-        let command = if listener.buffer.is_empty() {
-            None
-        } else {
-            Some(listener.buffer.join(" "))
-        };
-        listener.listening = false;
-        listener.buffer.clear();
-        info!("stop word detected");
+    let remainder = text[state.config.activation_word.len()..].trim();
+    if remainder.is_empty() {
         return HttpResponse::Ok().json(WebhookResponse {
-            status: "stopped",
-            command,
+            status: "ignored",
+            command: None,
         });
     }
 
-    listener.buffer.push(text);
+    if contains_stop_word(remainder, &state.config.stop_words) {
+        info!("stop word detected");
+        return HttpResponse::Ok().json(WebhookResponse {
+            status: "stopped",
+            command: None,
+        });
+    }
+
+    info!("activation detected");
     HttpResponse::Ok().json(WebhookResponse {
-        status: "capturing",
-        command: None,
+        status: "accepted",
+        command: Some(remainder.to_string()),
     })
 }
 
@@ -200,4 +162,9 @@ fn starts_with_word(text: &str, word: &str) -> bool {
         return false;
     }
     text.as_bytes().get(word.len()) == Some(&b' ')
+}
+
+fn contains_stop_word(text: &str, stop_words: &HashSet<String>) -> bool {
+    text.split_whitespace()
+        .any(|token| stop_words.contains(token))
 }

@@ -20,8 +20,8 @@ Environment variables (loaded via `.env` if present):
 ## Webhook behavior
 
 - Only requests that start with the activation word are accepted.
-- The command is the remainder of the same sentence.
-- If any stop word appears in the remainder, the request is treated as cancelled.
+- The command is the text after the activation word in the same sentence.
+- If any stop word appears in that command text, the request is treated as cancelled.
 
 Response example:
 

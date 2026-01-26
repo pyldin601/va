@@ -35,9 +35,9 @@ sentence.
 ## Behavior
 
 - Text is normalized by trimming and converting to lowercase.
-- If the text starts with the activation word, the remainder is treated as the command.
-- If any stop word appears in the remainder, the request is treated as cancelled.
-- If the remainder is empty, the request is ignored.
+- If the text starts with the activation word, the command is the text after it.
+- If any stop word appears in the command text, the request is treated as cancelled.
+- If the command text is empty, the request is ignored.
 
 ## Endpoints
 

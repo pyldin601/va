@@ -127,15 +127,15 @@ async fn webhook(
         });
     }
 
-    let remainder = text[state.config.activation_word.len()..].trim();
-    if remainder.is_empty() {
+    let command_text = text[state.config.activation_word.len()..].trim();
+    if command_text.is_empty() {
         return HttpResponse::Ok().json(WebhookResponse {
             status: "ignored",
             command: None,
         });
     }
 
-    if contains_stop_word(remainder, &state.config.stop_words) {
+    if contains_stop_word(command_text, &state.config.stop_words) {
         info!("stop word detected");
         return HttpResponse::Ok().json(WebhookResponse {
             status: "stopped",
@@ -146,7 +146,7 @@ async fn webhook(
     info!("activation detected");
     HttpResponse::Ok().json(WebhookResponse {
         status: "accepted",
-        command: Some(remainder.to_string()),
+        command: Some(command_text.to_string()),
     })
 }
 

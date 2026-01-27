@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "crates/va-voice/**"
+      - "crates/app/va-voice/**"
       - ".github/workflows/ci-va-voice.yml"
   workflow_dispatch:
 
@@ -53,7 +53,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
+          file: ./crates/app/va-voice/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

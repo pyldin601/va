@@ -9,10 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG VOSK_VERSION=0.3.45
 ENV VOSK_VERSION=$VOSK_VERSION
 
+ENV LIBRARY_PATH=/usr/local/lib
+
 RUN wget https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-$(arch)-$VOSK_VERSION.zip \
     && unzip vosk-linux-$(arch)-$VOSK_VERSION.zip \
     && rm vosk-linux-$(arch)-$VOSK_VERSION.zip \
-    && cp vosk-linux-*-$VOSK_VERSION/libvosk.so /usr/local/lib/
+    && cp vosk-linux-*-$VOSK_VERSION/libvosk.so $LIBRARY_PATH/
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates

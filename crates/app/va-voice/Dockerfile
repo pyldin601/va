@@ -15,7 +15,7 @@ RUN wget https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-lin
     && cp vosk-linux-*-$VOSK_VERSION/libvosk.so /usr/local/lib/
 
 COPY Cargo.toml Cargo.lock ./
-COPY crates/app/va-voice crates/app/va-voice
+COPY crates crates
 
 RUN cargo build --release --locked -p va-voice
 

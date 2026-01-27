@@ -4,13 +4,14 @@ mod error;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
 
 struct AppState {
     config: Config,
+    client: reqwest::Client,
 }
 
 #[derive(Deserialize)]
@@ -51,6 +52,7 @@ async fn main() -> std::io::Result<()> {
 
     let app_state = web::Data::new(AppState {
         config,
+        client: reqwest::Client::new(),
     });
 
     HttpServer::new(move || {
@@ -82,14 +84,17 @@ async fn webhook(
         });
     }
 
-    if !starts_with_word(&text, &state.config.activation_word) {
-        return HttpResponse::Ok().json(WebhookResponse {
-            status: "ignored",
-            command: None,
-        });
-    }
+    let activation_word = match find_activation_word(&text, &state.config.activation_words) {
+        Some(word) => word,
+        None => {
+            return HttpResponse::Ok().json(WebhookResponse {
+                status: "ignored",
+                command: None,
+            });
+        }
+    };
 
-    let command_text = text[state.config.activation_word.len()..].trim();
+    let command_text = text[activation_word.len()..].trim();
     if command_text.is_empty() {
         return HttpResponse::Ok().json(WebhookResponse {
             status: "ignored",
@@ -97,7 +102,8 @@ async fn webhook(
         });
     }
 
-    if contains_stop_word(command_text, &state.config.stop_words) {
+    let command_text = command_text.to_string();
+    if contains_stop_word(&command_text, &state.config.stop_words) {
         info!("stop word detected");
         return HttpResponse::Ok().json(WebhookResponse {
             status: "stopped",
@@ -105,10 +111,18 @@ async fn webhook(
         });
     }
 
+    if let Err(err) = forward_command(&state.client, &state.config.next_webhook_url, &command_text).await {
+        warn!("webhook forward error: {err:?}");
+        return HttpResponse::BadGateway().json(WebhookResponse {
+            status: "error",
+            command: Some(command_text),
+        });
+    }
+
     info!("activation detected");
     HttpResponse::Ok().json(WebhookResponse {
         status: "accepted",
-        command: Some(command_text.to_string()),
+        command: Some(command_text),
     })
 }
 
@@ -116,17 +130,33 @@ fn normalize(input: &str) -> String {
     input.trim().to_lowercase()
 }
 
-fn starts_with_word(text: &str, word: &str) -> bool {
-    if text == word {
-        return true;
+fn find_activation_word<'a>(text: &str, words: &'a [String]) -> Option<&'a str> {
+    for word in words {
+        if text == word {
+            return Some(word.as_str());
+        }
+        if text.starts_with(word) && text.as_bytes().get(word.len()) == Some(&b' ') {
+            return Some(word.as_str());
+        }
     }
-    if !text.starts_with(word) {
-        return false;
-    }
-    text.as_bytes().get(word.len()) == Some(&b' ')
+    None
 }
 
 fn contains_stop_word(text: &str, stop_words: &HashSet<String>) -> bool {
     text.split_whitespace()
         .any(|token| stop_words.contains(token))
+}
+
+async fn forward_command(
+    client: &reqwest::Client,
+    webhook_url: &str,
+    command: &str,
+) -> Result<(), reqwest::Error> {
+    client
+        .post(webhook_url)
+        .json(&serde_json::json!({ "text": command }))
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
 }

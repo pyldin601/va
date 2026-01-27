@@ -16,9 +16,10 @@ sentence.
 ```
 
 - Environment variables:
-  - `ACTIVATION_WORD` (required)
+  - `ACTIVATION_WORDS` (required, comma-separated)
   - `STOP_WORDS` (required, comma-separated)
   - `BIND_ADDR` (optional, default `127.0.0.1:8090`)
+  - `WEBHOOK_URL` (required)
   - `RUST_LOG` (optional)
 
 ## Outputs
@@ -27,7 +28,7 @@ sentence.
 
 ```json
 {
-  "status": "ignored | listening | capturing | stopped",
+  "status": "ignored | stopped | accepted | error",
   "command": "... or null"
 }
 ```
@@ -35,9 +36,10 @@ sentence.
 ## Behavior
 
 - Text is normalized by trimming and converting to lowercase.
-- If the text starts with the activation word, the command is the text after it.
+- If the text starts with any activation word, the command is the text after it.
 - If any stop word appears in the command text, the request is treated as cancelled.
 - If the command text is empty, the request is ignored.
+- If the command is accepted, it is forwarded to `WEBHOOK_URL` as `{ "text": "..." }`.
 
 ## Endpoints
 

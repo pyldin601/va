@@ -7,9 +7,10 @@ sentence.
 
 Environment variables (loaded via `.env` if present):
 
-- `ACTIVATION_WORD` (required): word that starts listening (case-insensitive).
+- `ACTIVATION_WORDS` (required): comma-separated list of words that start listening (case-insensitive).
 - `STOP_WORDS` (required): comma-separated list of words that stop listening.
 - `BIND_ADDR` (optional): address to bind the HTTP server (default: `127.0.0.1:8090`).
+- `WEBHOOK_URL` (required): downstream webhook URL that receives `{ "text": "..." }`.
 - `RUST_LOG` (optional): `tracing` filter, e.g. `info`.
 
 ## Endpoints
@@ -35,7 +36,8 @@ Response example:
 ## Run locally
 
 ```bash
-ACTIVATION_WORD=va \
+ACTIVATION_WORDS=va,assistant \
 STOP_WORDS=done,cancel \
+WEBHOOK_URL=http://127.0.0.1:8091/webhook \
 cargo run -p va-activator
 ```

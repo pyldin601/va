@@ -3,7 +3,8 @@ name: ci
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    paths:
+      - "crates/va-voice/**"
   workflow_dispatch:
 
 permissions:
@@ -44,7 +45,6 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=tag
             type=sha
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 

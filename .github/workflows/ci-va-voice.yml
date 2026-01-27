@@ -13,7 +13,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-va-voice-${{ github.ref }}
   cancel-in-progress: true
 
 env:

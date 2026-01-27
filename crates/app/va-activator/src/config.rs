@@ -10,10 +10,10 @@ const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
 
 #[derive(Clone)]
 pub(crate) struct Config {
-    pub(crate) activation_words: Vec<String>,
+    pub(crate) activation_words: HashSet<String>,
     pub(crate) stop_words: HashSet<String>,
     pub(crate) bind_addr: String,
-    pub(crate) next_webhook_url: String,
+    pub(crate) webhook_url: String,
 }
 
 impl Config {
@@ -24,7 +24,7 @@ impl Config {
             .split(',')
             .map(|word| word.trim().to_lowercase())
             .filter(|word| !word.is_empty())
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
         if activation_words.is_empty() {
             return Err(format!("{ENV_ACTIVATION_WORDS} must contain at least one word").into());
         }
@@ -41,11 +41,11 @@ impl Config {
         }
 
         let bind_addr = env::var(ENV_BIND_ADDR).unwrap_or_else(|_| "127.0.0.1:8090".to_string());
-        let next_webhook_url = env::var(ENV_WEBHOOK_URL)
+        let webhook_url = env::var(ENV_WEBHOOK_URL)
             .map_err(|_| format!("{ENV_WEBHOOK_URL} is not set"))?
             .trim()
             .to_string();
-        if next_webhook_url.is_empty() {
+        if webhook_url.is_empty() {
             return Err(format!("{ENV_WEBHOOK_URL} must not be empty").into());
         }
 
@@ -53,7 +53,7 @@ impl Config {
             activation_words,
             stop_words,
             bind_addr,
-            next_webhook_url,
+            webhook_url,
         })
     }
 }

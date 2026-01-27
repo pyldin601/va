@@ -111,7 +111,7 @@ async fn webhook(
         });
     }
 
-    if let Err(err) = forward_command(&state.client, &state.config.next_webhook_url, &command_text).await {
+    if let Err(err) = forward_command(&state.client, &state.config.webhook_url, &command_text).await {
         warn!("webhook forward error: {err:?}");
         return HttpResponse::BadGateway().json(WebhookResponse {
             status: "error",
@@ -130,7 +130,7 @@ fn normalize(input: &str) -> String {
     input.trim().to_lowercase()
 }
 
-fn find_activation_word<'a>(text: &str, words: &'a [String]) -> Option<&'a str> {
+fn find_activation_word<'a>(text: &str, words: &'a HashSet<String>) -> Option<&'a str> {
     for word in words {
         if text == word {
             return Some(word.as_str());
@@ -159,4 +159,144 @@ async fn forward_command(
         .await?
         .error_for_status()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, web, App, HttpResponse, HttpServer};
+    use std::sync::{Arc, Mutex};
+    use std::net::TcpListener;
+
+    #[derive(Deserialize)]
+    struct DownstreamRequest {
+        text: String,
+    }
+
+    fn test_config(webhook_url: String) -> Config {
+        Config {
+            activation_words: ["va".to_string(), "assistant".to_string()]
+                .into_iter()
+                .collect(),
+            stop_words: ["stop".to_string(), "cancel".to_string()]
+                .into_iter()
+                .collect(),
+            bind_addr: "127.0.0.1:0".to_string(),
+            webhook_url,
+        }
+    }
+
+    async fn start_downstream() -> (String, Arc<Mutex<Vec<String>>>, actix_web::dev::ServerHandle) {
+        let received = Arc::new(Mutex::new(Vec::<String>::new()));
+        let received_clone = received.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = HttpServer::new(move || {
+            let received = received_clone.clone();
+            App::new().route(
+                "/webhook",
+                web::post().to(move |payload: web::Json<DownstreamRequest>| {
+                    let received = received.clone();
+                    async move {
+                        received.lock().unwrap().push(payload.text.clone());
+                        HttpResponse::Ok().finish()
+                    }
+                }),
+            )
+        })
+        .listen(listener)
+        .unwrap()
+        .run();
+
+        let handle = server.handle();
+        actix_web::rt::spawn(server);
+
+        (format!("http://{addr}/webhook"), received, handle)
+    }
+
+    #[actix_web::test]
+    async fn forwards_command_for_any_activation_word() {
+        let (downstream_url, received, handle) = start_downstream().await;
+
+        let config = test_config(downstream_url);
+        let app_state = web::Data::new(AppState {
+            config,
+            client: reqwest::Client::new(),
+        });
+
+        let app = test::init_service(
+            App::new()
+                .app_data(app_state)
+                .service(webhook),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/webhook")
+            .set_json(&serde_json::json!({ "text": "assistant play music" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let forwarded = received.lock().unwrap();
+        assert_eq!(forwarded.as_slice(), &["play music"]);
+
+        handle.stop(true).await;
+    }
+
+    #[actix_web::test]
+    async fn ignores_empty_command_after_activation_word() {
+        let (downstream_url, _received, handle) = start_downstream().await;
+        let config = test_config(downstream_url);
+        let app_state = web::Data::new(AppState {
+            config,
+            client: reqwest::Client::new(),
+        });
+        let app = test::init_service(
+            App::new()
+                .app_data(app_state)
+                .service(webhook),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/webhook")
+            .set_json(&serde_json::json!({ "text": "va" }))
+            .to_request();
+        let resp: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(resp["status"], "ignored");
+        assert!(resp["command"].is_null());
+
+        handle.stop(true).await;
+    }
+
+    #[actix_web::test]
+    async fn stops_on_stop_word_and_does_not_forward() {
+        let (downstream_url, received, handle) = start_downstream().await;
+        let config = test_config(downstream_url);
+        let app_state = web::Data::new(AppState {
+            config,
+            client: reqwest::Client::new(),
+        });
+        let app = test::init_service(
+            App::new()
+                .app_data(app_state)
+                .service(webhook),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/webhook")
+            .set_json(&serde_json::json!({ "text": "va cancel the alarm" }))
+            .to_request();
+        let resp: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(resp["status"], "stopped");
+        assert!(resp["command"].is_null());
+
+        let forwarded = received.lock().unwrap();
+        assert!(forwarded.is_empty());
+
+        handle.stop(true).await;
+    }
 }

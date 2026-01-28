@@ -2385,6 +2385,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "va-command"
+version = "0.1.0"
+dependencies = [
+ "actix-web",
+ "dotenvy",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "va-voice"
 version = "0.1.0"
 dependencies = [

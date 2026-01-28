@@ -3,5 +3,6 @@ resolver = "2"
 
 members = [
     "crates/app/va-voice",
-    "crates/app/va-activator"
+    "crates/app/va-activator",
+    "crates/app/va-command"
 ]
